@@ -64,8 +64,8 @@ app.add_middleware(
     secret_key=settings.session_secret,
     session_cookie="love_session",
     max_age=86400,
-    https_only=False,
-    same_site="lax",
+    https_only=True,
+    same_site="none",
 )
 
 app.add_middleware(RateLimitMiddleware)
