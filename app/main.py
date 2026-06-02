@@ -54,6 +54,7 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "https://love-app-fe.vercel.app",
         "https://love-app-4iajldne7-thuy-s-projects.vercel.app",
+        "https://love-app-igja.onrender.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
