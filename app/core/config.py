@@ -1,4 +1,15 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+
+# Load environment from .env and Love_App.env if present.
+# This helps local/testing workflows when the file is named Love_App.env,
+# while still allowing Render to use real service environment variables.
+root = Path(__file__).resolve().parents[2]
+load_dotenv(root / ".env", override=False)
+load_dotenv(root / "Love_App.env", override=False)
 
 
 class Settings(BaseSettings):

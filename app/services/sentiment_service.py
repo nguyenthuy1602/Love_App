@@ -140,7 +140,13 @@ async def _external_ai_sentiment(content: str) -> tuple[str, float] | None:
     if not settings.ai_sentiment_api_url:
         return None
 
-    url = settings.ai_sentiment_api_url
+    from urllib.parse import urlparse
+
+    url = settings.ai_sentiment_api_url.strip()
+    parsed = urlparse(url)
+    if not parsed.path or parsed.path == "/":
+        url = url.rstrip("/") + "/predict"
+
     headers = {"Content-Type": "application/json"}
     if settings.ai_sentiment_api_key:
         headers["Authorization"] = f"Bearer {settings.ai_sentiment_api_key}"
@@ -152,6 +158,7 @@ async def _external_ai_sentiment(content: str) -> tuple[str, float] | None:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
+        logger.info("External AI sentiment call success: url=%s status=%s", url, resp.status_code)
 
         # Flexible parsing: tìm `sentiment` và `confidence` ở nhiều vị trí
         sentiment = None
@@ -202,6 +209,7 @@ async def _external_ai_sentiment(content: str) -> tuple[str, float] | None:
             confidence = 0.5
 
         confidence = max(0.0, min(1.0, confidence))
+        logger.info("External AI sentiment result: sentiment=%s confidence=%s status=%s", sentiment, confidence, status)
         return sentiment, confidence
 
     except Exception as e:
