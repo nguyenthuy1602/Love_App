@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Request
-from typing import Optional
 
 from app.core.deps import require_session
 from app.db.mongodb import get_database
@@ -14,27 +13,23 @@ from app.services.notification_service import notify_new_match
 router = APIRouter(prefix="/match", tags=["Matching"])
 
 
-@router.get("/suggest", response_model=Optional[MatchResponse])
+@router.get("/suggest", response_model=list[MatchResponse])
 async def suggest_sentiment_match(request: Request):
     user_id = require_session(request)
     db = get_database()
     try:
         return await suggest_by_sentiment(db, user_id)
     except ValueError as e:
-        if str(e) == "No available users to match":
-            return None
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.get("/random", response_model=Optional[MatchResponse])
+@router.get("/random", response_model=list[MatchResponse])
 async def random_match(request: Request):
     user_id = require_session(request)
     db = get_database()
     try:
         return await suggest_random(db, user_id)
     except ValueError as e:
-        if str(e) == "No available users to match":
-            return None
         raise HTTPException(status_code=404, detail=str(e))
 
 

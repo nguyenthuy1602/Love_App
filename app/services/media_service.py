@@ -89,7 +89,7 @@ async def upload_media(file: UploadFile, user_id: str, folder: str = "posts") ->
             local_path.write_bytes(content)
 
             return {
-                "url": f"http://localhost:8000/static/{folder}/{user_id}/{local_name}",
+                "url": f"{settings.base_url}/static/{folder}/{user_id}/{local_name}",
                 "media_type": media_type,
                 "public_id": f"local/{folder}/{user_id}/{local_name}",
             }

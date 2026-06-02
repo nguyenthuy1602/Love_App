@@ -53,6 +53,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://love-app-fe.vercel.app",
+        "https://love-app-4iajldne7-thuy-s-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -64,8 +65,11 @@ app.add_middleware(
     secret_key=settings.session_secret,
     session_cookie="love_session",
     max_age=86400,
-    https_only=True,
-    same_site="none",
+    # Use secure cookies (HTTPS + SameSite=None) in production. For local
+    # development, allow non-HTTPS cookies so session cookie is sent over
+    # http://localhost during dev workflows.
+    https_only=(settings.app_env == "production"),
+    same_site=("none" if settings.app_env == "production" else "lax"),
 )
 
 app.add_middleware(RateLimitMiddleware)

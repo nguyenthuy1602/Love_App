@@ -1,7 +1,7 @@
 """
 Matching Service — Epic 3
-Ghép đôi dựa trên sentiment (Gemini-powered) hoặc ngẫu nhiên.
-Có kiểm tra block, tính compatibility score, hiển thị online status.
+Ghép đôi dựa trên sentiment hoặc ngẫu nhiên.
+Có kiểm tra block, lọc tương thích sentiment, hiển thị online status.
 """
 
 import random
@@ -12,12 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.schemas.match import MatchResponse, MatchStatus
 from app.core.connection_manager import manager
 
-# Cặp sentiment bổ trợ nhau (người buồn gặp người vui)
-COMPLEMENTARY = {
-    "positive": ["positive", "neutral"],
-    "negative": ["positive", "neutral"],
-    "neutral":  ["positive", "neutral", "negative"],
-}
+MAX_MATCH_SUGGESTIONS = 6
 
 
 def _serialize_match(doc: dict) -> MatchResponse:
@@ -37,6 +32,26 @@ def _serialize_match(doc: dict) -> MatchResponse:
     )
 
 
+def _normalize_sentiment(value: str | None) -> str:
+    sentiment = (value or "neutral").strip().lower()
+    if sentiment not in {"positive", "neutral", "negative"}:
+        return "neutral"
+    return sentiment
+
+
+def _is_compatible_pair(user_sentiment: str | None, target_sentiment: str | None) -> bool:
+    user = _normalize_sentiment(user_sentiment)
+    target = _normalize_sentiment(target_sentiment)
+
+    if user == "negative":
+        return target == "positive"
+    if user == "neutral":
+        return target in {"positive", "neutral"}
+    if user == "positive":
+        return target in {"positive", "neutral", "negative"}
+    return target in {"positive", "neutral"}
+
+
 async def _get_excluded_user_ids(
     db: AsyncIOMotorDatabase, user_id: str
 ) -> set:
@@ -48,9 +63,13 @@ async def _get_excluded_user_ids(
     })
     docs = await cursor.to_list(length=500)
     excluded = {user_id}
+    # Chỉ loại trừ những user đã thực sự 'ACCEPTED' (đã kết đôi).
+    # Điều này cho phép gợi lại những người từng được tạo match nhưng chưa
+    # được chấp nhận (pending) hoặc đã bị skip — theo yêu cầu.
     for doc in docs:
-        excluded.add(str(doc["user1_id"]))
-        excluded.add(str(doc["user2_id"]))
+        if doc.get("status") == MatchStatus.ACCEPTED:
+            excluded.add(str(doc["user1_id"]))
+            excluded.add(str(doc["user2_id"]))
 
     # Đã block hoặc bị block
     block_cursor = db.blocks.find({
@@ -86,13 +105,11 @@ async def _create_match_doc(
     return _serialize_match(doc)
 
 
-async def suggest_by_sentiment(
-    db: AsyncIOMotorDatabase, user_id: str
-) -> MatchResponse:
-    """
-    Gợi ý dựa trên sentiment tương thích.
-    Ưu tiên: cùng sentiment → sentiment bổ trợ → ngẫu nhiên.
-    """
+async def _pick_candidate_targets(
+    db: AsyncIOMotorDatabase,
+    user_id: str,
+    limit: int = MAX_MATCH_SUGGESTIONS,
+) -> list[dict]:
     oid = ObjectId(user_id)
     me = await db.users.find_one({"_id": oid})
     if not me:
@@ -102,50 +119,59 @@ async def suggest_by_sentiment(
     excluded = await _get_excluded_user_ids(db, user_id)
     excluded_oids = [ObjectId(uid) for uid in excluded if ObjectId.is_valid(uid)]
 
-    # 1. Cùng sentiment
-    candidates = await db.users.find({
-        "_id": {"$nin": excluded_oids},
-        "sentiment_profile": my_sentiment,
-    }).to_list(length=50)
+    cursor = db.users.find({"_id": {"$nin": excluded_oids}})
+    candidates = await cursor.to_list(length=500)
+    candidates = [
+        user for user in candidates
+        if _is_compatible_pair(my_sentiment, user.get("sentiment_profile"))
+    ]
 
-    # 2. Sentiment bổ trợ
-    if not candidates:
-        compatible = COMPLEMENTARY.get(my_sentiment, ["neutral"])
-        candidates = await db.users.find({
-            "_id": {"$nin": excluded_oids},
-            "sentiment_profile": {"$in": compatible},
-        }).to_list(length=50)
+    random.shuffle(candidates)
+    return candidates[:limit]
 
-    # 3. Fallback ngẫu nhiên
-    if not candidates:
-        candidates = await db.users.find(
-            {"_id": {"$nin": excluded_oids}}
-        ).to_list(length=50)
 
-    if not candidates:
-        raise ValueError("No available users to match")
+async def suggest_by_sentiment(
+    db: AsyncIOMotorDatabase, user_id: str
+) -> list[MatchResponse]:
+    """
+    Gợi ý tối đa 5 người dựa trên sentiment tương thích.
+    Quy tắc:
+    - positive có thể ghép với positive / neutral / negative
+    - neutral có thể ghép với positive / neutral
+    - negative chỉ ghép với positive
+    - negative + negative bị chặn tuyệt đối
+    """
+    me = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not me:
+        raise ValueError("User not found")
 
-    target = random.choice(candidates)
-    return await _create_match_doc(db, user_id, me["username"], target)
+    targets = await _pick_candidate_targets(db, user_id)
+    if not targets:
+        return []
+
+    matches: list[MatchResponse] = []
+    for target in targets:
+        match = await _create_match_doc(db, user_id, me["username"], target)
+        matches.append(match)
+    return matches
 
 
 async def suggest_random(
     db: AsyncIOMotorDatabase, user_id: str
-) -> MatchResponse:
-    excluded = await _get_excluded_user_ids(db, user_id)
-    excluded_oids = [ObjectId(uid) for uid in excluded if ObjectId.is_valid(uid)]
+) -> list[MatchResponse]:
+    targets = await _pick_candidate_targets(db, user_id)
 
-    candidates = await db.users.find(
-        {"_id": {"$nin": excluded_oids}}
-    ).to_list(length=100)
+    if not targets:
+        return []
 
-    if not candidates:
-        raise ValueError("No available users to match")
-
-    target = random.choice(candidates)
     me = await db.users.find_one({"_id": ObjectId(user_id)})
     username = me["username"] if me else ""
-    return await _create_match_doc(db, user_id, username, target)
+
+    matches: list[MatchResponse] = []
+    for target in targets:
+        match = await _create_match_doc(db, user_id, username, target)
+        matches.append(match)
+    return matches
 
 
 async def accept_match(

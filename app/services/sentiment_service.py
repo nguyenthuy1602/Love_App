@@ -35,6 +35,24 @@ NEGATIVE_KEYWORDS = {
     "miserable", "unhappy", "disappointed", "hopeless", "upset",
 }
 
+# Map common emotion labels from external services to our 3 sentiment classes
+EMOTION_TO_SENTIMENT = {
+    "joy": "positive",
+    "happy": "positive",
+    "happiness": "positive",
+    "excited": "positive",
+    "love": "positive",
+    "sadness": "negative",
+    "sad": "negative",
+    "anger": "negative",
+    "angry": "negative",
+    "fear": "negative",
+    "anxiety": "negative",
+    "disgust": "negative",
+    "neutral": "neutral",
+    "calm": "neutral",
+}
+
 
 def _rule_based_sentiment(content: str) -> tuple[str, float]:
     text = content.lower()
@@ -113,6 +131,84 @@ async def _gemini_sentiment(content: str) -> tuple[str, float] | None:
         return None
 
 
+async def _external_ai_sentiment(content: str) -> tuple[str, float] | None:
+    """
+    Gọi external AI layer nếu `settings.ai_sentiment_api_url` được cấu hình.
+    Kỳ vọng response trả về JSON chứa `sentiment` và `confidence` (linh hoạt với nhiều trường tên khác).
+    Trả về (sentiment, confidence) hoặc None nếu lỗi.
+    """
+    if not settings.ai_sentiment_api_url:
+        return None
+
+    url = settings.ai_sentiment_api_url
+    headers = {"Content-Type": "application/json"}
+    if settings.ai_sentiment_api_key:
+        headers["Authorization"] = f"Bearer {settings.ai_sentiment_api_key}"
+
+    payload = {"text": content}
+
+    try:
+        async with httpx.AsyncClient(timeout=getattr(settings, "gemini_timeout", 8)) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Flexible parsing: tìm `sentiment` và `confidence` ở nhiều vị trí
+        sentiment = None
+        confidence = None
+        if isinstance(data, dict):
+            sentiment = data.get("sentiment") or data.get("label") or data.get("prediction")
+            # some services return an `emotion` field like "Sadness" — map it
+            emotion = data.get("emotion")
+            status = data.get("status")
+            if not sentiment and emotion:
+                mapped = EMOTION_TO_SENTIMENT.get(str(emotion).strip().lower())
+                if mapped:
+                    sentiment = mapped
+            # if response includes nested objects, try to extract from them
+            confidence = data.get("confidence") or data.get("score") or data.get("probability")
+            # kiểm tra các nhánh khác
+            for key in ("result", "data", "prediction"):
+                if not sentiment and key in data and isinstance(data[key], dict):
+                    sentiment = sentiment or data[key].get("sentiment")
+                    confidence = confidence or data[key].get("confidence")
+                    if not sentiment and data[key].get("emotion"):
+                        mapped = EMOTION_TO_SENTIMENT.get(str(data[key].get("emotion")).strip().lower())
+                        if mapped:
+                            sentiment = mapped
+
+            # if top-level status exists and is not success, treat as failure
+            if status and isinstance(status, str) and status.strip().lower() != "success":
+                return None
+
+        if isinstance(sentiment, str):
+            sentiment = sentiment.strip().lower()
+            if sentiment not in ("positive", "negative", "neutral"):
+                # map một vài nhãn hay gặp
+                if sentiment.startswith("pos"):
+                    sentiment = "positive"
+                elif sentiment.startswith("neg"):
+                    sentiment = "negative"
+                elif sentiment.startswith("neu"):
+                    sentiment = "neutral"
+                else:
+                    sentiment = "neutral"
+        else:
+            sentiment = "neutral"
+
+        try:
+            confidence = float(confidence) if confidence is not None else 0.5
+        except Exception:
+            confidence = 0.5
+
+        confidence = max(0.0, min(1.0, confidence))
+        return sentiment, confidence
+
+    except Exception as e:
+        logger.warning(f"External AI sentiment failed: {e}")
+        return None
+
+
 # ── Public API ────────────────────────────────────────────────
 
 async def analyze_sentiment(content: str) -> tuple[str, float]:
@@ -120,9 +216,15 @@ async def analyze_sentiment(content: str) -> tuple[str, float]:
     Phân tích sentiment. Ưu tiên Gemini, fallback rule-based.
     Trả về (sentiment, confidence).
     """
+    # Ưu tiên external AI layer nếu có cấu hình, fallback về Gemini rồi rule-based
+    result = await _external_ai_sentiment(content)
+    if result:
+        return result
+
     result = await _gemini_sentiment(content)
     if result:
         return result
+
     return _rule_based_sentiment(content)
 
 

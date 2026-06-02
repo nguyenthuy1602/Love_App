@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import unicodedata
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -6,13 +7,20 @@ from app.schemas.message import MessageResponse, ChatHistoryResponse
 
 
 def _serialize_message(doc: dict) -> MessageResponse:
+    created_at = doc["created_at"]
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = created_at.astimezone(timezone.utc)
+
     return MessageResponse(
         id=str(doc["_id"]),
         match_id=str(doc["match_id"]),
         sender_id=str(doc["sender_id"]),
         sender_username=doc.get("sender_username", ""),
         content=doc["content"],
-        created_at=doc["created_at"],
+        created_at=created_at,
     )
 
 
@@ -23,11 +31,12 @@ async def save_message(
     sender_username: str,
     content: str,
 ) -> MessageResponse:
+    normalized_content = unicodedata.normalize("NFC", content or "")
     doc = {
         "match_id": ObjectId(match_id),
         "sender_id": ObjectId(sender_id),
         "sender_username": sender_username,
-        "content": content,
+        "content": normalized_content,
         "created_at": datetime.now(timezone.utc),
     }
     result = await db.messages.insert_one(doc)

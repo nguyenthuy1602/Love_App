@@ -5,8 +5,8 @@ python-multipart==0.0.9
 aiofiles==23.2.1
 
 # ── Database ──────────────────────────────
-motor==3.3.2
-pymongo==4.6.2
+motor==3.7.1
+pymongo==4.10.1
 dnspython==2.6.1
 
 # ── Auth & security ───────────────────────

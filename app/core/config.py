@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ── App ───────────────────────────────────────────────────
     app_env: str = "development"
+    base_url: str = "http://localhost:8000"
     session_secret: str = "CHANGE_THIS_SECRET_IN_PRODUCTION"
 
     # ── MongoDB ───────────────────────────────────────────────
@@ -15,6 +16,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-1.5-flash"         # nhanh và rẻ cho sentiment
     gemini_timeout: int = 8                         # seconds
 
+    # ── External AI layer (configurable via environment for Render) ──
+    ai_sentiment_api_url: str = ""   # e.g. https://my-ai-layer.example.com/sentiment
+    ai_sentiment_api_key: str = ""   # optional API key for the external AI layer
     # ── Cloudinary (media upload) ─────────────────────────────
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
