@@ -1,7 +1,7 @@
 """
-Sentiment Analysis Service — Gemini AI
-Phân tích cảm xúc bài viết bằng Gemini API.
-Fallback về rule-based nếu Gemini không khả dụng hoặc key chưa cấu hình.
+Sentiment Analysis Service — Aura / external AI layer
+Phân tích cảm xúc bài viết bằng external AI layer hoặc Gemini API.
+Fallback về rule-based nếu không có external AI và Gemini không khả dụng.
 """
 
 import json
@@ -89,7 +89,7 @@ Văn bản cần phân tích:
 
 async def _gemini_sentiment(content: str) -> tuple[str, float] | None:
     """
-    Gọi Gemini API để phân tích sentiment.
+    Legacy fallback: gọi Gemini API chỉ khi external AI layer không khả dụng.
     Trả về (sentiment, confidence) hoặc None nếu lỗi.
     """
     if not settings.gemini_api_key:
@@ -127,7 +127,7 @@ async def _gemini_sentiment(content: str) -> tuple[str, float] | None:
         return sentiment, confidence
 
     except Exception as e:
-        logger.warning(f"Gemini sentiment failed: {e} — falling back to rule-based")
+        logger.warning(f"Aura sentiment (Gemini fallback) failed: {e} — falling back to rule-based")
         return None
 
 
@@ -221,7 +221,7 @@ async def _external_ai_sentiment(content: str) -> tuple[str, float] | None:
 
 async def analyze_sentiment(content: str) -> tuple[str, float]:
     """
-    Phân tích sentiment. Ưu tiên Gemini, fallback rule-based.
+    Phân tích sentiment. Ưu tiên external AI layer, fallback Gemini rồi rule-based.
     Trả về (sentiment, confidence).
     """
     # Ưu tiên external AI layer nếu có cấu hình, fallback về Gemini rồi rule-based

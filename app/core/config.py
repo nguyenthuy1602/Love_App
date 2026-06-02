@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     mongodb_uri: str = "mongodb://localhost:27017"
     database_name: str = "love_db"
 
-    # ── Gemini AI ─────────────────────────────────────────────
+    # ── Legacy Gemini fallback ──────────────────────────────────
+    # Nếu external AI layer chưa cấu hình, backend vẫn có thể dùng Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"         # nhanh và rẻ cho sentiment
     gemini_timeout: int = 8                         # seconds
