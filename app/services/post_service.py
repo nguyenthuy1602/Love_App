@@ -5,9 +5,18 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.schemas.post import PostCreateRequest, PostResponse, FeedResponse, ReactionSummary
 from app.services.sentiment_service import analyze_sentiment, update_user_sentiment_profile
 
+def _clamp_reaction_counts(reactions: dict) -> dict:
+    return {
+        "heart": max(int(reactions.get("heart", 0)), 0),
+        "sad": max(int(reactions.get("sad", 0)), 0),
+        "wow": max(int(reactions.get("wow", 0)), 0),
+        "haha": max(int(reactions.get("haha", 0)), 0),
+        "fire": max(int(reactions.get("fire", 0)), 0),
+    }
+
 
 def _serialize_post(doc: dict, my_reaction: str | None = None) -> PostResponse:
-    reactions_raw = doc.get("reactions", {})
+    reactions_raw = _clamp_reaction_counts(doc.get("reactions", {}))
     return PostResponse(
         id=str(doc["_id"]),
         user_id=str(doc["user_id"]),
@@ -19,11 +28,11 @@ def _serialize_post(doc: dict, my_reaction: str | None = None) -> PostResponse:
         sentiment_score=doc.get("sentiment_score"),
         sentiment_confidence=doc.get("sentiment_confidence"),
         reactions=ReactionSummary(
-            heart=reactions_raw.get("heart", 0),
-            sad=reactions_raw.get("sad", 0),
-            wow=reactions_raw.get("wow", 0),
-            haha=reactions_raw.get("haha", 0),
-            fire=reactions_raw.get("fire", 0),
+            heart=reactions_raw["heart"],
+            sad=reactions_raw["sad"],
+            wow=reactions_raw["wow"],
+            haha=reactions_raw["haha"],
+            fire=reactions_raw["fire"],
             my_reaction=my_reaction,
         ),
         comment_count=doc.get("comment_count", 0),

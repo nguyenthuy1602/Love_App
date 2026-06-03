@@ -12,6 +12,15 @@ from app.schemas.reaction import ReactionType, ReactionCountResponse
 
 VALID_TYPES = {r.value for r in ReactionType}
 
+def _clamp_reaction_counts(reactions: dict) -> dict:
+    return {
+        "heart": max(int(reactions.get("heart", 0)), 0),
+        "sad": max(int(reactions.get("sad", 0)), 0),
+        "wow": max(int(reactions.get("wow", 0)), 0),
+        "haha": max(int(reactions.get("haha", 0)), 0),
+        "fire": max(int(reactions.get("fire", 0)), 0),
+    }
+
 
 async def react_to_post(
     db: AsyncIOMotorDatabase,
@@ -74,7 +83,7 @@ async def react_to_post(
 
     # Trả về counts mới nhất
     updated = await db.posts.find_one({"_id": post_oid}, {"reactions": 1})
-    r = updated.get("reactions", {})
+    r = _clamp_reaction_counts(updated.get("reactions", {}))
 
     my_reaction_doc = await db.reactions.find_one({
         "post_id": post_oid, "user_id": user_oid
@@ -82,11 +91,11 @@ async def react_to_post(
 
     return ReactionCountResponse(
         post_id=post_id,
-        heart=r.get("heart", 0),
-        sad=r.get("sad", 0),
-        wow=r.get("wow", 0),
-        haha=r.get("haha", 0),
-        fire=r.get("fire", 0),
+        heart=r["heart"],
+        sad=r["sad"],
+        wow=r["wow"],
+        haha=r["haha"],
+        fire=r["fire"],
         my_reaction=my_reaction_doc["reaction_type"] if my_reaction_doc else None,
     )
 
@@ -103,7 +112,7 @@ async def get_reaction_counts(
     if not post:
         raise ValueError("Post not found")
 
-    r = post.get("reactions", {})
+    r = _clamp_reaction_counts(post.get("reactions", {}))
     my_reaction = None
     if user_id:
         doc = await db.reactions.find_one({
@@ -113,10 +122,10 @@ async def get_reaction_counts(
 
     return ReactionCountResponse(
         post_id=post_id,
-        heart=r.get("heart", 0),
-        sad=r.get("sad", 0),
-        wow=r.get("wow", 0),
-        haha=r.get("haha", 0),
-        fire=r.get("fire", 0),
+        heart=r["heart"],
+        sad=r["sad"],
+        wow=r["wow"],
+        haha=r["haha"],
+        fire=r["fire"],
         my_reaction=my_reaction,
     )
