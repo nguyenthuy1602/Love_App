@@ -22,6 +22,21 @@ def _clamp_reaction_counts(reactions: dict) -> dict:
     }
 
 
+async def _get_authoritative_reaction_counts(
+    db: AsyncIOMotorDatabase, post_oid: ObjectId
+) -> dict:
+    counts = {"heart": 0, "sad": 0, "wow": 0, "haha": 0, "fire": 0}
+    pipeline = [
+        {"$match": {"post_id": post_oid}},
+        {"$group": {"_id": "$reaction_type", "count": {"$sum": 1}}},
+    ]
+    cursor = db.reactions.aggregate(pipeline)
+    async for doc in cursor:
+        if doc and doc.get("_id") in counts:
+            counts[doc["_id"]] = int(doc.get("count", 0))
+    return counts
+
+
 async def react_to_post(
     db: AsyncIOMotorDatabase,
     post_id: str,
@@ -53,20 +68,11 @@ async def react_to_post(
     if existing and existing["reaction_type"] == reaction_type:
         # Toggle off — xóa reaction
         await db.reactions.delete_one({"_id": existing["_id"]})
-        await db.posts.update_one(
-            {"_id": post_oid},
-            {"$inc": {f"reactions.{reaction_type}": -1}},
-        )
     elif existing:
         # Đổi reaction cũ → mới
-        old_type = existing["reaction_type"]
         await db.reactions.update_one(
             {"_id": existing["_id"]},
             {"$set": {"reaction_type": reaction_type, "updated_at": datetime.now(timezone.utc)}},
-        )
-        await db.posts.update_one(
-            {"_id": post_oid},
-            {"$inc": {f"reactions.{old_type}": -1, f"reactions.{reaction_type}": 1}},
         )
     else:
         # Reaction mới
@@ -76,14 +82,15 @@ async def react_to_post(
             "reaction_type": reaction_type,
             "created_at": datetime.now(timezone.utc),
         })
-        await db.posts.update_one(
-            {"_id": post_oid},
-            {"$inc": {f"reactions.{reaction_type}": 1}},
-        )
 
-    # Trả về counts mới nhất
-    updated = await db.posts.find_one({"_id": post_oid}, {"reactions": 1})
-    r = _clamp_reaction_counts(updated.get("reactions", {}))
+    # Recompute authoritative counts from actual reaction documents to avoid sync drift
+    authoritative = await _get_authoritative_reaction_counts(db, post_oid)
+    await db.posts.update_one(
+        {"_id": post_oid},
+        {"$set": {"reactions": authoritative}},
+    )
+
+    r = _clamp_reaction_counts(authoritative)
 
     my_reaction_doc = await db.reactions.find_one({
         "post_id": post_oid, "user_id": user_oid
@@ -112,7 +119,7 @@ async def get_reaction_counts(
     if not post:
         raise ValueError("Post not found")
 
-    r = _clamp_reaction_counts(post.get("reactions", {}))
+    r = await _get_authoritative_reaction_counts(db, post_oid)
     my_reaction = None
     if user_id:
         doc = await db.reactions.find_one({
